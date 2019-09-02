@@ -1,4 +1,5 @@
 import xlrd
+import operator
 
 class Lotto645Analysis:
     def __init__(self, file):
@@ -47,7 +48,7 @@ class Lotto645Analysis:
             elif matchCnt == 3:     # 5등
                 print(i + 1, 5)
 
-    def AnalisysWinNumbers(self):
+    def CompareWithEachWinNumbers(self):
         for i in range(len(self.lottoWins)):
             srcLotto = self.lottoWins[i]
             for j in range(len(self.lottoWins)):
@@ -72,10 +73,23 @@ class Lotto645Analysis:
                             print(i + 1, j + 1, 2)
                     if is2nd == False:
                         print(i + 1, j + 1, 3)
-            
+
+    def SumWinNumbers(self):
+        l = {}
+        for i in range(len(self.lottoWins)):
+            srcLotto = self.lottoWins[i]
+            sum = 0
+            for j in range(len(srcLotto) - 1):
+                sum += srcLotto[j]
+            if str(sum) not in l:
+                l[str(sum)] = 0
+            l[str(sum)] += 1
+        
+        print(sorted(l.items(), key=lambda kv: kv[1], reverse=True))
 
 
 if __name__ == "__main__":
     lotto = Lotto645Analysis('lotto.xls')
-    lotto.CompareMyLotto([1,2,3,4,5,6])
-    lotto.AnalisysWinNumbers()
+    #lotto.CompareMyLotto([1,2,3,4,5,6])
+    #lotto.CompareWithEachWinNumbers()
+    lotto.SumWinNumbers()
