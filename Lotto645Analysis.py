@@ -13,6 +13,7 @@ class Lotto645Analysis:
         self.winLottosSumSorted = []
         self.DownloadLottoResults()
         self.InitSumWinNumbers()
+        self.PrintLatestWinLottoAnalysis()
 
     def DownloadLottoResults(self):
         url = 'https://dhlottery.co.kr/gameResult.do?method=allWinExel&gubun=byWin&nowPage=&drwNoStart=1&drwNoEnd=9999'
@@ -69,6 +70,22 @@ class Lotto645Analysis:
         self.winLottosSumSorted = sorted(
             self.winLottosSum.items(), key=lambda kv: kv[1], reverse=True)
 
+    def PrintLatestWinLottoAnalysis(self):
+        id = len(self.winLottos)
+        print(f'{len(self.winLottos)}회 1등 번호')
+        print(f'{self.winLottos[id][0]}, {self.winLottos[id][1]}, {self.winLottos[id][2]}, {self.winLottos[id][3]}, {self.winLottos[id][4]}, {self.winLottos[id][5]}')
+
+        prize = self.CompareWithWinLottos(self.winLottos[id])
+        print(f'1등 {prize[0]}, 2등 {prize[1]}, 3등 {prize[2]}, 4등 {prize[3]}, 5등 {prize[4]}')
+
+        lottoSum = 0
+        for i in self.winLottos[id]:
+            lottoSum += i
+        if str(lottoSum) in self.winLottosSum:
+            print('로또합 횟수', lottoSum, self.winLottosSum[str(lottoSum)])
+
+        print('--------------------------')
+
     def PrintWinLottoSums(self):
         for sum in self.winLottosSumSorted:
             print(sum)
@@ -104,7 +121,6 @@ class Lotto645Analysis:
     def PrintMyLottoPrizeHistory(self, myNumber, printShort=True):
         print('역대 1등 번호와 비교')
         print('내 번호', myNumber)
-        prizeHistory = {'1st': 0, '2nd': 0, '3rd': 0, '4th': 0, '5th': 0}
 
         prize = self.CompareWithWinLottos(myNumber)
         print('1등 {0}, 2등 {1}, 3등 {2}, 4등 {3}, 5등 {4}'.format(
@@ -207,6 +223,8 @@ class Lotto645Analysis:
                         break
                 pickNum.append(newNum)
 
+            pickNum = sorted(pickNum)
+
             for num in pickNum:
                 sum += num
 
@@ -231,9 +249,5 @@ class Lotto645Analysis:
 if __name__ == "__main__":
     lotto = Lotto645Analysis()
     #lotto.CompareWithEachWinNumbers()
-    lotto.PrintMyLottoPrizeHistory([19, 32, 37, 40, 41, 43])
-    #lotto.PrintMyLottoPrizeHistory([4, 35, 45, 25, 14, 1])
-    #lotto.PrintMyLottoPrizeHistory([42, 7, 29, 1, 23, 22])
-    #lotto.PrintMyLottoPrizeHistory([21, 20, 37, 39, 15, 1])
-    #lotto.PrintMyLottoPrizeHistory([21, 24, 17, 7, 34, 23])
-    #lotto.GenWinNumbers(1, 45, 6, 5)
+    #lotto.PrintMyLottoPrizeHistory([1, 7, 10, 12, 19, 23])
+    #lotto.GenWinNumbers(1, 45, 6, 4)
