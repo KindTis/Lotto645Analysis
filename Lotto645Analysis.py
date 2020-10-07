@@ -131,6 +131,8 @@ class Lotto645Analysis:
             myLottoSum += i
         if str(myLottoSum) in self.winLottosSum:
             print('로또합 횟수', myLottoSum, self.winLottosSum[str(myLottoSum)])
+        else:
+            print('로또합 횟수 파싱 오류')
 
         print('--------------------------')
 
@@ -222,8 +224,7 @@ class Lotto645Analysis:
                     if isDuplicateNum is False:
                         break
                 pickNum.append(newNum)
-
-            pickNum = sorted(pickNum)
+            pickNum.sort()
 
             for num in pickNum:
                 sum += num
@@ -249,5 +250,6 @@ class Lotto645Analysis:
 if __name__ == "__main__":
     lotto = Lotto645Analysis()
     #lotto.CompareWithEachWinNumbers()
-    #lotto.PrintMyLottoPrizeHistory([1, 7, 10, 12, 19, 23])
-    #lotto.GenWinNumbers(1, 45, 6, 4)
+    #lotto.PrintWinLottoSums()
+    #lotto.PrintMyLottoPrizeHistory([1,7,10,12,19,23])
+    lotto.GenWinNumbers(1, 45, 6, 4)
