@@ -122,8 +122,9 @@ class Lotto645Analysis:
         print(f'1등 {prize[0]}, 2등 {prize[1]}, 3등 {prize[2]}, 4등 {prize[3]}, 5등 {prize[4]}')
 
         lottoSum = 0
-        for i in self.winLottos[id]:
-            lottoSum += i
+        for i in range(len(self.winLottos[id]) - 1):
+            lottoSum += self.winLottos[id][i]
+
         if str(lottoSum) in self.winLottosSum:
             print('로또합 횟수', lottoSum, self.winLottosSum[str(lottoSum)])
         else:
@@ -303,4 +304,4 @@ if __name__ == "__main__":
     #lotto.PrintWinLottoSums(8)
     #lotto.PrintWinLottoPrizeHistory()
     #lotto.PrintMyLottoPrizeHistory([1, 7, 10, 12, 19, 23])
-    lotto.GenWinNumbers(1, 45, 6, 4)
+    #lotto.GenWinNumbers(1, 45, 6, 4)
