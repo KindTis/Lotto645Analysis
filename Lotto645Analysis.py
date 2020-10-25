@@ -74,7 +74,7 @@ class Lotto645Analysis:
         self.winLottosSumSorted = sorted(
             self.winLottosSum.items(), key=lambda kv: kv[1], reverse=True)
 
-    def CalcNumbersWeight(self, printWeight=False):
+    def CalcNumbersWeight(self, _printWeight=False):
         winLottoNumsAppear = {}
         for key in self.winLottos:
             numbers = self.winLottos[key]
@@ -102,7 +102,7 @@ class Lotto645Analysis:
         for key in winLottoNumsAppear:
             self.NumbersWeight[key-1] = diffNum[key-1] / sumDiff
 
-        if printWeight == True:
+        if _printWeight == True:
             totalWeight = 0.
             for index in range(len(self.NumbersWeight)):
                 totalWeight += self.NumbersWeight[index]
@@ -132,7 +132,7 @@ class Lotto645Analysis:
 
         print('----------------------------------------------------')
 
-    def PrintWinLottoSums(self, pivot = 10):
+    def PrintWinLottoSums(self, _pivot = 10):
         print('로또합 리스트')
         tabOffset = 0
         calAppearCnt = 0
@@ -146,13 +146,13 @@ class Lotto645Analysis:
                 print(sum, '\t', end='')
 
             totalAppearCnt += sum[1]
-            if sum[1] >= pivot:
+            if sum[1] >= _pivot:
                 calAppearCnt += sum[1]
 
         if tabOffset != 0:
             print('')
 
-        print(pivot, '로또합 점유율:', calAppearCnt/totalAppearCnt)
+        print(_pivot, '로또합 점유율:', calAppearCnt/totalAppearCnt)
         print('----------------------------------------------------')
 
     def PrintWinLottoPrizeHistory(self):
@@ -226,39 +226,39 @@ class Lotto645Analysis:
         print(analysis)
         print('----------------------------------------------------')
 
-    def PrintMyLottoPrizeHistory(self, myNumber, printShort=True):
+    def PrintMyLottoPrizeHistory(self, _myNumber, printShort=True):
         print('역대 1등 번호와 비교')
-        print('내 번호', myNumber)
+        print('내 번호', _myNumber)
 
-        prize = self.CompareWithWinLottos(myNumber)
+        prize = self.CompareWithWinLottos(_myNumber)
         print('1등 {0}, 2등 {1}, 3등 {2}, 4등 {3}, 5등 {4}'.format(
             prize[0], prize[1], prize[2], prize[3], prize[4]))
 
         myLottoSum = 0
-        for i in myNumber:
+        for i in _myNumber:
             myLottoSum += i
         if str(myLottoSum) in self.winLottosSum:
             print('로또합 횟수', myLottoSum, self.winLottosSum[str(myLottoSum)])
 
         print('----------------------------------------------------')
 
-    def CompareWithWinLottos(self, myNumber):
+    def CompareWithWinLottos(self, _myNumber):
         prize = [0, 0, 0, 0, 0]
 
         for key in self.winLottos:
             matchCnt = 0
             winNumber = self.winLottos[key]
-            for j in range(len(myNumber)):
+            for j in range(len(_myNumber)):
                 for k in range(len(winNumber) - 1):
-                    if myNumber[j] == winNumber[k]:
+                    if _myNumber[j] == winNumber[k]:
                         matchCnt += 1
 
             if matchCnt == 6:  # 1등
                 prize[0] += 1
             elif matchCnt == 5:  # 2, 3등
                 is2nd = False
-                for j in range(len(myNumber)):
-                    if myNumber[j] == winNumber[6]:
+                for j in range(len(_myNumber)):
+                    if _myNumber[j] == winNumber[6]:
                         is2nd = True
                         prize[1] += 1
                 if is2nd is False:
@@ -270,33 +270,44 @@ class Lotto645Analysis:
 
         return prize
 
-    def GenWinNumbers(self, min, max, len, cnt):
-        _cnt = 0
+    def GenWinNumbers(self, _len, _cnt):
+        cnt = 0
         while True:
-            pickNum = []
+            pickNums = []
             sum = 0
             
-            pickNum = np.random.choice(np.arange(0, 45), len, p=self.NumbersWeight)
-            pickNum.sort()
-            for index in range(len):
-                pickNum[index] += 1
-                sum += pickNum[index]
+            while True:
+                if len(pickNums) == _len:
+                    break
+                pickNum = np.random.choice(np.arange(0, 45), 1, p=self.NumbersWeight)
+                if pickNum[0] in pickNums:
+                    continue
+                else:
+                    pickNums.append(pickNum[0])
+                     
+            
+            pickNums.sort()
+            for index in range(_len):
+                pickNums[index] += 1
+                sum += pickNums[index]
 
             if str(sum) in self.winLottosSum:
                 if self.winLottosSum[str(sum)] < 8:
                     continue
 
-                prize = self.CompareWithWinLottos(pickNum)
+                prize = self.CompareWithWinLottos(pickNums)
                 if prize[4] < 15 or prize[1] > 0 or prize[0] > 0:
                     continue
 
-                _cnt += 1
-                print(pickNum)
+                cnt += 1
+                print(pickNums)
                 print('합 {0} 출현횟수 {1}, 당첨횟수 1:{2}, 2:{3}, 3:{4}, 4:{5}, 5:{6}'.
                       format(sum, self.winLottosSum[str(sum)], prize[0], prize[
                           1], prize[2], prize[3], prize[4]))
+            else:
+                continue
 
-            if _cnt == cnt:
+            if cnt == _cnt:
                 break
 
 if __name__ == "__main__":
@@ -304,4 +315,4 @@ if __name__ == "__main__":
     #lotto.PrintWinLottoSums(8)
     #lotto.PrintWinLottoPrizeHistory()
     #lotto.PrintMyLottoPrizeHistory([1, 7, 10, 12, 19, 23])
-    #lotto.GenWinNumbers(1, 45, 6, 4)
+    lotto.GenWinNumbers(6, 4)
