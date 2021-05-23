@@ -1,5 +1,6 @@
 # coding: utf-8
 
+import sys
 import random
 import time
 import urllib.request
@@ -311,8 +312,10 @@ class Lotto645Analysis:
                 break
 
 if __name__ == "__main__":
+    genCnt = input('How Many Generate Lottory Number? : ')
+
     lotto = Lotto645Analysis()
     #lotto.PrintWinLottoSums(8)
     #lotto.PrintWinLottoPrizeHistory()
     #lotto.PrintMyLottoPrizeHistory([1, 7, 10, 12, 19, 23])
-    lotto.GenWinNumbers(6, 4)
+    lotto.GenWinNumbers(6, int(genCnt))
