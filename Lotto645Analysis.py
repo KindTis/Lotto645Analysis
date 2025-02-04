@@ -1,321 +1,285 @@
+#!/usr/bin/env python3
 # coding: utf-8
 
-import sys
-import random
-import time
-import urllib.request
+import re
+import logging
+import requests
 import numpy as np
 from collections import defaultdict
 from bs4 import BeautifulSoup
 
+# 로깅 설정 (필요 시 DEBUG 레벨로 조정)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
+
+def parse_table_with_rowspan(table):
+    """
+    HTML 테이블을 파싱하여 rowspan과 colspan을 반영한 2차원 리스트로 반환합니다.
+    각 행은 셀의 텍스트 리스트로 구성됩니다.
+    """
+    rows = table.find_all("tr")
+    table_data = []
+    spanned = {}  # (row_idx, col_idx) -> cell_text
+
+    for row_idx, row in enumerate(rows):
+        cells = []
+        col_idx = 0
+        # 이전 행에서 rowspan 때문에 채워져야 할 셀들을 먼저 삽입
+        while (row_idx, col_idx) in spanned:
+            cells.append(spanned[(row_idx, col_idx)])
+            col_idx += 1
+        for cell in row.find_all(["td", "th"]):
+            cell_text = cell.get_text(strip=True)
+            colspan = int(cell.get("colspan", 1))
+            rowspan = int(cell.get("rowspan", 1))
+            for i in range(colspan):
+                cells.append(cell_text)
+                if rowspan > 1:
+                    for j in range(1, rowspan):
+                        spanned[(row_idx + j, col_idx)] = cell_text
+                col_idx += 1
+        table_data.append(cells)
+    return table_data
+
+
+def combine_headers(header_row1, header_row2):
+    """
+    첫 번째 헤더 행(header_row1)과 두 번째 헤더 행(header_row2)를 조합하여 최종 헤더 리스트를 생성합니다.
+    
+    제공된 테이블 구조에서는 첫 3개 셀(예: "년도", "회차", "추첨일")은 rowspan="2"로 되어 있어
+    두 번째 헤더 행에 중복되어 나타납니다. 따라서 header_row2의 처음 3개 항목이 header_row1과 동일하다면 제거한 후,
+    header_row1의 나머지 각 그룹과 header_row2의 값을 '_'로 결합합니다.
+    
+    예) 최종 헤더는 아래와 같이 생성됩니다.
+      ['년도', '회차', '추첨일',
+       '1등_당첨자수', '1등_당첨금액',
+       '2등_당첨자수', '2등_당첨금액',
+       '3등_당첨자수', '3등_당첨금액',
+       '4등_당첨자수', '4등_당첨금액',
+       '5등_당첨자수', '5등_당첨금액',
+       '당첨번호_1', '당첨번호_2', '당첨번호_3', '당첨번호_4', '당첨번호_5', '당첨번호_6', '당첨번호_보너스']
+    """
+    # 만약 header_row2의 앞 3개 항목이 header_row1의 앞 3개와 동일하다면 제거
+    if header_row2[:3] == header_row1[:3]:
+        header_row2 = header_row2[3:]
+    headers = header_row1[:3]
+    # header_row1의 4번째부터 끝까지(총 len(header_row1)-3개)와 header_row2의 항목들을 순서대로 결합
+    for i, subheader in enumerate(header_row2):
+        headers.append(f"{header_row1[i+3]}_{subheader}")
+    return headers
+
+
+def parse_int(text):
+    """
+    문자열에서 쉼표나 '원' 등의 문자를 제거한 후 정수로 변환합니다.
+    """
+    if text is None:
+        return 0
+    text = text.replace(",", "")
+    text = re.sub(r"원", "", text)
+    match = re.search(r"\d+", text)
+    return int(match.group()) if match else 0
+
 
 class Lotto645Analysis:
     def __init__(self):
-        self.winLottos = {}
-        self.winLottosSum = {}
-        self.winLottosSumSorted = []
-        self.NumbersWeight = []
-        self.DownloadLottoResults()
-        self.SortSumWinNumbers()
-        self.CalcNumbersWeight()
-        self.PrintLatestWinLottoAnalysis()
+        self.winLottos = {}            # key: 회차(정수), value: {"main": [6개 당첨번호], "bonus": 보너스번호, "date": 추첨일}
+        self.winLottosSum = {}         # 메인 6개 번호 합의 출현 빈도
+        self.winLottosSumSorted = []   # 정렬된 합 출현 빈도 리스트
+        self.numbersWeight = np.zeros(45, dtype=float)
+        self.download_lotto_results()
+        self.sort_sum_win_numbers()
+        self.calc_numbers_weight()
+        self.print_latest_win_lotto_analysis()
 
-    def DownloadLottoResults(self):
-        url = 'https://dhlottery.co.kr/gameResult.do?method=allWinExel&gubun=byWin&nowPage=&drwNoStart=1&drwNoEnd=9999'
+    def download_lotto_results(self):
+        """
+        지정된 URL에서 로또 당첨 번호 테이블을 파싱하여 self.winLottos에 저장합니다.
+        테이블은 두 개의 헤더 행과 이후 데이터 행으로 구성되며,
+        당첨번호는 "당첨번호_1" ~ "당첨번호_6" 및 "당첨번호_보너스" 열에서 추출합니다.
+        """
+        url = "https://dhlottery.co.kr/gameResult.do?method=allWinExel&gubun=byWin&nowPage=&drwNoStart=1&drwNoEnd=9999"
+        try:
+            response = requests.get(url)
+            response.raise_for_status()
+        except requests.RequestException as e:
+            logging.error(f"로또 결과 다운로드 실패: {e}")
+            return
 
-        self.winLottos.clear()
-        with urllib.request.urlopen(url) as respone:
-            html = respone.read()
-            soup = BeautifulSoup(html, 'html.parser')
-            table = soup.find_all('table')
-            numbersTable = table[1]
-            for winNumbers in numbersTable.children:
-                if winNumbers == '\n':
-                    continue
-                if winNumbers.find(
-                        string='5,000원') == None and winNumbers.find(
-                            string='10,000원') == None:
-                    continue
+        soup = BeautifulSoup(response.content, "html.parser")
+        table = soup.find("table", {"border": "1"})
+        if table is None:
+            logging.error("로또 결과 테이블을 찾지 못했습니다.")
+            return
 
-                winLottoNumbers = []
-                if len(winNumbers.contents) == 41:
-                    key = int(winNumbers.contents[3].text)
-                    winLottoNumbers.append(int(winNumbers.contents[27].text))
-                    winLottoNumbers.append(int(winNumbers.contents[29].text))
-                    winLottoNumbers.append(int(winNumbers.contents[31].text))
-                    winLottoNumbers.append(int(winNumbers.contents[33].text))
-                    winLottoNumbers.append(int(winNumbers.contents[35].text))
-                    winLottoNumbers.append(int(winNumbers.contents[37].text))
-                    winLottoNumbers.append(int(winNumbers.contents[39].text))
-                else:
-                    key = int(winNumbers.contents[1].text)
-                    winLottoNumbers.append(int(winNumbers.contents[25].text))
-                    winLottoNumbers.append(int(winNumbers.contents[27].text))
-                    winLottoNumbers.append(int(winNumbers.contents[29].text))
-                    winLottoNumbers.append(int(winNumbers.contents[31].text))
-                    winLottoNumbers.append(int(winNumbers.contents[33].text))
-                    winLottoNumbers.append(int(winNumbers.contents[35].text))
-                    winLottoNumbers.append(int(winNumbers.contents[37].text))
-                self.winLottos[key] = winLottoNumbers
+        table_data = parse_table_with_rowspan(table)
+        if len(table_data) < 3:
+            logging.error("헤더와 데이터 행이 충분하지 않습니다.")
+            return
 
-        print('총 {0}회차 취합됨'.format(len(self.winLottos)))
-        print('----------------------------------------------------')
+        header_row1 = table_data[0]
+        header_row2 = table_data[1]
+        headers = combine_headers(header_row1, header_row2)
+        data_rows = table_data[2:]
 
-    def SortSumWinNumbers(self):
-        self.winLottosSum.clear()
-        for key in self.winLottos:
-            srcLotto = self.winLottos[key]
-            sum = 0
-            for j in range(len(srcLotto) - 1):
-                sum += srcLotto[j]
-            if str(sum) not in self.winLottosSum:
-                self.winLottosSum[str(sum)] = 0
-            self.winLottosSum[str(sum)] += 1
+        for row in data_rows:
+            if len(row) < len(headers):
+                row.extend([None] * (len(headers) - len(row)))
+            row_dict = dict(zip(headers, row))
 
-        self.winLottosSumSorted = sorted(
-            self.winLottosSum.items(), key=lambda kv: kv[1], reverse=True)
-
-    def CalcNumbersWeight(self, _printWeight=False):
-        winLottoNumsAppear = {}
-        for key in self.winLottos:
-            numbers = self.winLottos[key]
-            for num in numbers:
-                if num not in winLottoNumsAppear:
-                    winLottoNumsAppear[num] = 0
-                winLottoNumsAppear[num] += 1
-
-        diffNum = np.zeros(len(winLottoNumsAppear), dtype=int)
-        self.NumbersWeight = np.zeros(len(winLottoNumsAppear), dtype=float)
-        maxNum = 0
-        minNum = 999
-        sumDiff = 0
-        for key in winLottoNumsAppear:
-            if winLottoNumsAppear[key] > maxNum:
-                maxNum = winLottoNumsAppear[key]
-            if winLottoNumsAppear[key] < minNum:
-                minNum = winLottoNumsAppear[key]
-        maxNum += ((maxNum - minNum) / 2)
-
-        for key in winLottoNumsAppear:
-            diffNum[key-1] = maxNum - winLottoNumsAppear[key]
-            sumDiff += diffNum[key-1]
-
-        for key in winLottoNumsAppear:
-            self.NumbersWeight[key-1] = diffNum[key-1] / sumDiff
-
-        if _printWeight == True:
-            totalWeight = 0.
-            for index in range(len(self.NumbersWeight)):
-                totalWeight += self.NumbersWeight[index]
-                print(f'[{index+1}:{self.NumbersWeight[index]:.3f}]\t', end='')
-                if ((index + 1) % 5) == 0:
-                    print('')
-            print(f'total weight: {totalWeight}')
-            print('----------------------------------------------------')
-
-
-    def PrintLatestWinLottoAnalysis(self):
-        id = len(self.winLottos)
-        print(f'{len(self.winLottos)}회 1등 번호')
-        print(f'{self.winLottos[id][0]}, {self.winLottos[id][1]}, {self.winLottos[id][2]}, {self.winLottos[id][3]}, {self.winLottos[id][4]}, {self.winLottos[id][5]}')
-
-        prize = self.CompareWithWinLottos(self.winLottos[id])
-        print(f'1등 {prize[0]}, 2등 {prize[1]}, 3등 {prize[2]}, 4등 {prize[3]}, 5등 {prize[4]}')
-
-        lottoSum = 0
-        for i in range(len(self.winLottos[id]) - 1):
-            lottoSum += self.winLottos[id][i]
-
-        if str(lottoSum) in self.winLottosSum:
-            print('로또합 횟수', lottoSum, self.winLottosSum[str(lottoSum)])
-        else:
-            print('로또합 횟수 파싱 오류')
-
-        print('----------------------------------------------------')
-
-    def PrintWinLottoSums(self, _pivot = 10):
-        print('로또합 리스트')
-        tabOffset = 0
-        calAppearCnt = 0
-        totalAppearCnt = 0
-        for sum in self.winLottosSumSorted:
-            tabOffset += 1
-            if tabOffset == 6:
-                tabOffset = 0
-                print(sum, '\t', end='\n')
-            else:
-                print(sum, '\t', end='')
-
-            totalAppearCnt += sum[1]
-            if sum[1] >= _pivot:
-                calAppearCnt += sum[1]
-
-        if tabOffset != 0:
-            print('')
-
-        print(_pivot, '로또합 점유율:', calAppearCnt/totalAppearCnt)
-        print('----------------------------------------------------')
-
-    def PrintWinLottoPrizeHistory(self):
-        analysis = {
-            '510': 0,
-            '515': 0,
-            '520': 0,
-            '525': 0,
-            '530': 0,
-            '410': 0,
-            '415': 0,
-            '420': 0,
-            '425': 0,
-            '430': 0
-        }
-        for srckey in self.winLottos:
-            prizeHistory = {'1st': 0, '2nd': 0, '3rd': 0, '4th': 0, '5th': 0}
-            srcLotto = self.winLottos[srckey]
-
-            for dstkey in self.winLottos:
-                if srckey == dstkey:
-                    continue
-
-                matchCnt = 0
-                dstLotto = self.winLottos[dstkey]
-
-                for i in range(len(srcLotto) - 1):
-                    for j in range(len(dstLotto) - 1):
-                        if srcLotto[i] == dstLotto[j]:
-                            matchCnt += 1
-
-                if matchCnt == 6:  # 1등
-                    prizeHistory['1st'] += 1
-                elif matchCnt == 5:  # 2, 3등
-                    is2nd = False
-                    for j in range(len(srcLotto)):
-                        if srcLotto[j] == dstLotto[6]:
-                            is2nd = True
-                            prizeHistory['2nd'] += 1
-                    if is2nd is False:
-                        prizeHistory['3rd'] += 1
-                elif matchCnt == 4:  # 4등
-                    prizeHistory['4th'] += 1
-                elif matchCnt == 3:  # 5등
-                    prizeHistory['5th'] += 1
-
-            if prizeHistory['5th'] > 30:
-                analysis['530'] += 1
-            elif prizeHistory['5th'] >= 25:
-                analysis['525'] += 1
-            elif prizeHistory['5th'] >= 20:
-                analysis['520'] += 1
-            elif prizeHistory['5th'] >= 15:
-                analysis['515'] += 1
-            elif prizeHistory['5th'] >= 10:
-                analysis['510'] += 1
-
-            if prizeHistory['4th'] > 30:
-                analysis['430'] += 1
-            elif prizeHistory['4th'] >= 25:
-                analysis['425'] += 1
-            elif prizeHistory['4th'] >= 20:
-                analysis['420'] += 1
-            elif prizeHistory['4th'] >= 15:
-                analysis['415'] += 1
-            elif prizeHistory['4th'] >= 10:
-                analysis['410'] += 1
-
-        
-        print('등수별 출현 횟수')
-        print(analysis)
-        print('----------------------------------------------------')
-
-    def PrintMyLottoPrizeHistory(self, _myNumber, printShort=True):
-        print('역대 1등 번호와 비교')
-        print('내 번호', _myNumber)
-
-        prize = self.CompareWithWinLottos(_myNumber)
-        print('1등 {0}, 2등 {1}, 3등 {2}, 4등 {3}, 5등 {4}'.format(
-            prize[0], prize[1], prize[2], prize[3], prize[4]))
-
-        myLottoSum = 0
-        for i in _myNumber:
-            myLottoSum += i
-        if str(myLottoSum) in self.winLottosSum:
-            print('로또합 횟수', myLottoSum, self.winLottosSum[str(myLottoSum)])
-
-        print('----------------------------------------------------')
-
-    def CompareWithWinLottos(self, _myNumber):
-        prize = [0, 0, 0, 0, 0]
-
-        for key in self.winLottos:
-            matchCnt = 0
-            winNumber = self.winLottos[key]
-            for j in range(len(_myNumber)):
-                for k in range(len(winNumber) - 1):
-                    if _myNumber[j] == winNumber[k]:
-                        matchCnt += 1
-
-            if matchCnt == 6:  # 1등
-                prize[0] += 1
-            elif matchCnt == 5:  # 2, 3등
-                is2nd = False
-                for j in range(len(_myNumber)):
-                    if _myNumber[j] == winNumber[6]:
-                        is2nd = True
-                        prize[1] += 1
-                if is2nd is False:
-                    prize[2] += 1
-            elif matchCnt == 4:  # 4등
-                prize[3] += 1
-            elif matchCnt == 3:  # 5등
-                prize[4] += 1
-
-        return prize
-
-    def GenWinNumbers(self, _len, _cnt):
-        cnt = 0
-        while True:
-            pickNums = []
-            sum = 0
-            
-            while True:
-                if len(pickNums) == _len:
-                    break
-                pickNum = np.random.choice(np.arange(0, 45), 1, p=self.NumbersWeight)
-                if pickNum[0] in pickNums:
-                    continue
-                else:
-                    pickNums.append(pickNum[0])
-                     
-            
-            pickNums.sort()
-            for index in range(_len):
-                pickNums[index] += 1
-                sum += pickNums[index]
-
-            if str(sum) in self.winLottosSum:
-                if self.winLottosSum[str(sum)] < 8:
-                    continue
-
-                prize = self.CompareWithWinLottos(pickNums)
-                if prize[4] < 15 or prize[1] > 0 or prize[0] > 0:
-                    continue
-
-                cnt += 1
-                print(pickNums)
-                print('합 {0} 출현횟수 {1}, 당첨횟수 1:{2}, 2:{3}, 3:{4}, 4:{5}, 5:{6}'.
-                      format(sum, self.winLottosSum[str(sum)], prize[0], prize[
-                          1], prize[2], prize[3], prize[4]))
-            else:
+            # "회차" 열에서 회차 번호 추출
+            try:
+                draw_no = int(row_dict.get("회차", "0").strip())
+            except Exception as e:
+                logging.warning(f"회차 파싱 실패: {row_dict.get('회차')} -> {e}")
                 continue
 
-            if cnt == _cnt:
-                break
+            # 당첨번호는 "당첨번호_1" ~ "당첨번호_6" 및 "당첨번호_보너스" 열에서 추출
+            try:
+                main_numbers = []
+                for i in range(1, 7):
+                    key = f"당첨번호_{i}"
+                    num = parse_int(row_dict.get(key, "0"))
+                    main_numbers.append(num)
+                bonus = parse_int(row_dict.get("당첨번호_보너스", "0"))
+            except Exception as e:
+                logging.warning(f"당첨 번호 파싱 실패 for 회차 {draw_no}: {e}")
+                continue
+
+            self.winLottos[draw_no] = {
+                "main": main_numbers,
+                "bonus": bonus,
+                "date": row_dict.get("추첨일", "")
+            }
+        logging.info(f"총 {len(self.winLottos)}회차의 당첨 번호를 취합함")
+        print("-" * 60)
+
+    def sort_sum_win_numbers(self):
+        """
+        각 회차의 메인 6개 번호 합에 대해 출현 빈도를 계산합니다.
+        """
+        self.winLottosSum.clear()
+        for result in self.winLottos.values():
+            total = sum(result["main"])
+            self.winLottosSum[total] = self.winLottosSum.get(total, 0) + 1
+        self.winLottosSumSorted = sorted(
+            self.winLottosSum.items(), key=lambda x: x[1], reverse=True
+        )
+
+    def calc_numbers_weight(self, print_weight=False):
+        """
+        번호별 등장 빈도에 반비례하는 가중치를 계산합니다.
+        빈도가 낮은 번호에 더 높은 가중치를 부여하여 번호 생성 시 활용합니다.
+        """
+        number_appearances = defaultdict(int)
+        for result in self.winLottos.values():
+            for num in result["main"]:
+                number_appearances[num] += 1
+            number_appearances[result["bonus"]] += 1
+
+        for num in range(1, 46):
+            number_appearances.setdefault(num, 0)
+
+        frequencies = list(number_appearances.values())
+        max_freq = max(frequencies)
+        min_freq = min(frequencies)
+        adjusted_max = max_freq + ((max_freq - min_freq) / 2)
+        diff_total = 0
+        diff = {}
+        for num, count in number_appearances.items():
+            diff[num] = adjusted_max - count
+            diff_total += diff[num]
+
+        for num in range(1, 46):
+            self.numbersWeight[num - 1] = diff[num] / diff_total
+
+        if print_weight:
+            total_weight = self.numbersWeight.sum()
+            for i, weight in enumerate(self.numbersWeight, start=1):
+                print(f"[{i}:{weight:.3f}]", end="\t")
+                if i % 5 == 0:
+                    print()
+            print(f"\nTotal weight: {total_weight:.3f}")
+            print("-" * 60)
+
+    def print_latest_win_lotto_analysis(self):
+        """
+        최신 회차 당첨 번호와 번호 합 빈도 및 당첨 비교 결과를 출력합니다.
+        """
+        if not self.winLottos:
+            print("당첨 번호 데이터가 없습니다.")
+            return
+        latest_draw = max(self.winLottos.keys())
+        result = self.winLottos[latest_draw]
+        print(f"{latest_draw}회차 1등 번호:")
+        print(", ".join(map(str, result["main"])))
+        prize = self.compare_with_win_lottos(result["main"])
+        print(f"당첨 횟수: 1등 {prize[0]}, 2등 {prize[1]}, 3등 {prize[2]}, 4등 {prize[3]}, 5등 {prize[4]}")
+        total = sum(result["main"])
+        if total in self.winLottosSum:
+            print(f"로또 합: {total}, 출현 횟수: {self.winLottosSum[total]}")
+        else:
+            print("로또 합 파싱 오류")
+        print("-" * 60)
+
+    def compare_with_win_lottos(self, candidate):
+        """
+        candidate (메인 6개 번호 리스트)를 역대 당첨 번호와 비교하여
+        [1등, 2등, 3등, 4등, 5등]에 해당하는 당첨 횟수를 반환합니다.
+        (1등: 6개 모두 일치, 2등: 5개 일치 + 보너스, 3등: 5개 일치, 4등: 4개, 5등: 3개)
+        """
+        prize = [0, 0, 0, 0, 0]
+        candidate_set = set(candidate)
+        for result in self.winLottos.values():
+            main_set = set(result["main"])
+            match_count = len(candidate_set & main_set)
+            if match_count == 6:
+                prize[0] += 1
+            elif match_count == 5:
+                if result["bonus"] in candidate_set:
+                    prize[1] += 1
+                else:
+                    prize[2] += 1
+            elif match_count == 4:
+                prize[3] += 1
+            elif match_count == 3:
+                prize[4] += 1
+        return prize
+
+    def generate_win_numbers(self, num_numbers, count):
+        """
+        가중치 확률 분포를 사용하여 후보 로또 번호 세트를 생성합니다.
+        생성 조건:
+          - 생성된 번호의 메인 6개 합이 역대 당첨 번호에서 최소 빈도(예, 8회 이상) 이상이어야 함.
+          - 당첨 분석 시 1등 또는 2등 당첨 기록이 없어야 하며, 5등 당첨 횟수가 일정 수치 이상이어야 함.
+        """
+        generated = 0
+        while generated < count:
+            candidate_indices = np.random.choice(
+                np.arange(45), size=num_numbers, replace=False, p=self.numbersWeight
+            )
+            candidate = np.sort(candidate_indices + 1).tolist()
+            candidate_sum = sum(candidate)
+            if self.winLottosSum.get(candidate_sum, 0) < 8:
+                continue
+            prize = self.compare_with_win_lottos(candidate)
+            if prize[0] > 0 or prize[1] > 0 or prize[4] < 15:
+                continue
+            generated += 1
+            print(candidate)
+            print(
+                f"합: {candidate_sum}, 출현 횟수: {self.winLottosSum.get(candidate_sum, 0)}, "
+                f"당첨 횟수: 1등 {prize[0]}, 2등 {prize[1]}, 3등 {prize[2]}, 4등 {prize[3]}, 5등 {prize[4]}"
+            )
+            print("-" * 60)
+
 
 if __name__ == "__main__":
-    genCnt = input('How Many Generate Lottory Number? : ')
+    try:
+        gen_count = int(input("생성할 로또 번호 후보 개수를 입력하세요: "))
+    except ValueError:
+        print("올바른 숫자를 입력해주세요.")
+        exit(1)
 
     lotto = Lotto645Analysis()
-    #lotto.PrintWinLottoSums(8)
-    #lotto.PrintWinLottoPrizeHistory()
-    #lotto.PrintMyLottoPrizeHistory([1, 7, 10, 12, 19, 23])
-    lotto.GenWinNumbers(6, int(genCnt))
+    lotto.generate_win_numbers(num_numbers=6, count=gen_count)
