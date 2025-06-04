@@ -253,25 +253,40 @@ class Lotto645Analysis:
           - 생성된 번호의 메인 6개 합이 역대 당첨 번호에서 최소 빈도(예, 8회 이상) 이상이어야 함.
           - 당첨 분석 시 1등 또는 2등 당첨 기록이 없어야 하며, 5등 당첨 횟수가 일정 수치 이상이어야 함.
         """
+        if not self.winLottosSum:
+            raise RuntimeError(
+                "로또 데이터가 존재하지 않습니다. 'download_lotto_results' 호출을 확인하세요."
+            )
+
         generated = 0
-        while generated < count:
+        attempts = 0
+        max_attempts = count * 100  # 무한 루프 방지를 위한 최대 시도 횟수
+        while generated < count and attempts < max_attempts:
             candidate_indices = np.random.choice(
                 np.arange(45), size=num_numbers, replace=False, p=self.numbersWeight
             )
             candidate = np.sort(candidate_indices + 1).tolist()
             candidate_sum = sum(candidate)
             if self.winLottosSum.get(candidate_sum, 0) < 8:
+                attempts += 1
                 continue
             prize = self.compare_with_win_lottos(candidate)
             if prize[0] > 0 or prize[1] > 0 or prize[4] < 15:
+                attempts += 1
                 continue
             generated += 1
+            attempts += 1
             print(candidate)
             print(
                 f"합: {candidate_sum}, 출현 횟수: {self.winLottosSum.get(candidate_sum, 0)}, "
                 f"당첨 횟수: 1등 {prize[0]}, 2등 {prize[1]}, 3등 {prize[2]}, 4등 {prize[3]}, 5등 {prize[4]}"
             )
             print("-" * 60)
+
+        if generated < count:
+            print(
+                f"조건에 맞는 번호를 모두 생성하지 못했습니다. 생성된 번호: {generated}개, 시도 횟수: {attempts}"
+            )
 
 
 if __name__ == "__main__":
